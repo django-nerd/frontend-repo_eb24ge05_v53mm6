@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 function MacroBar({ label, value, color }) {
-  const pct = Math.max(0, Math.min(100, (Number(value || 0) / 100) * 100)) // visualize vs 100g cap
+  const pct = Math.max(0, Math.min(100, (Number(value || 0) / 100) * 100))
   return (
     <div className="mb-2">
       <div className="flex justify-between text-xs text-gray-500 mb-1">
@@ -27,9 +27,13 @@ function IngredientChips({ items }) {
 }
 
 function App() {
-  const BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+  // Backend URL resolution with storage override and HTTPS-safe default
+  const STORED_URL = typeof window !== 'undefined' ? localStorage.getItem('cv_backend_url') : null
+  const ENV_URL = import.meta.env.VITE_BACKEND_URL
+  const DEFAULT_URL = 'https://ta-01k9qmnkhg6nmxz9yh6b76hrje-8000.wo-vegsibht7ip3wtc6l08w8melx.w.modal.host'
+  const BASE_URL = (STORED_URL || ENV_URL || DEFAULT_URL)
 
-  const [mode, setMode] = useState('login') // 'login' | 'signup' | 'app'
+  const [mode, setMode] = useState('login')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -40,17 +44,17 @@ function App() {
   const [message, setMessage] = useState('')
   const [showDetail, setShowDetail] = useState(false)
   const [detailMeal, setDetailMeal] = useState(null)
+  const [showSettings, setShowSettings] = useState(false)
+  const [backendUrlDraft, setBackendUrlDraft] = useState(BASE_URL)
 
   const fileInputRef = useRef(null)
 
-  // Load user from storage
   useEffect(() => {
     const saved = localStorage.getItem('cv_user')
     if (saved) {
       const u = JSON.parse(saved)
       setUser(u)
       setMode('app')
-      // Load cached meals first for snappy UI
       const cached = localStorage.getItem(`cv_meals_${u.user_id}`)
       if (cached) {
         try { setMeals(JSON.parse(cached)) } catch {}
@@ -59,7 +63,6 @@ function App() {
     }
   }, [])
 
-  // Persist meals per user to storage
   useEffect(() => {
     if (user) {
       localStorage.setItem(`cv_meals_${user.user_id}`, JSON.stringify(meals))
@@ -96,14 +99,13 @@ function App() {
       localStorage.setItem('cv_user', JSON.stringify(data))
       setMode('app')
       setPassword('')
-      // Load cached meals and refresh from API
       const cached = localStorage.getItem(`cv_meals_${data.user_id}`)
       if (cached) {
         try { setMeals(JSON.parse(cached)) } catch {}
       }
       fetchMeals(data.user_id)
     } catch (err) {
-      setMessage(err.message)
+      setMessage(err.message || 'Network error')
     }
   }
 
@@ -154,14 +156,12 @@ function App() {
         ingredients: result.ingredients,
       }
       setMeals((prev) => [newMeal, ...prev])
-      // Persist last analysis for quick resume
       localStorage.setItem('cv_last_analysis', JSON.stringify(newMeal))
-      // Show fancy detail sheet
       setDetailMeal(newMeal)
       setShowDetail(true)
       setMessage('')
     } catch (err) {
-      setMessage(err.message)
+      setMessage(err.message || 'Network error')
     } finally {
       setUploading(false)
     }
@@ -189,6 +189,15 @@ function App() {
     setDetailMeal(null)
   }
 
+  const saveBackendUrl = () => {
+    try {
+      const trimmed = (backendUrlDraft || '').trim()
+      if (!trimmed) return
+      localStorage.setItem('cv_backend_url', trimmed)
+      window.location.reload()
+    } catch {}
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center">
       <div className="w-full max-w-md p-6">
@@ -201,9 +210,12 @@ function App() {
               <p className="text-xs text-gray-500">Snap your meal. Know your calories.</p>
             </div>
           </div>
-          {user && (
-            <button onClick={logout} className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">Logout</button>
-          )}
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowSettings(true)} className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">Settings</button>
+            {user && (
+              <button onClick={logout} className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">Logout</button>
+            )}
+          </div>
         </div>
 
         {/* Auth */}
@@ -303,6 +315,23 @@ function App() {
             <div>
               <p className="text-sm font-medium text-gray-800">Ingredients</p>
               <IngredientChips items={detailMeal.ingredients} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowSettings(false)} />
+          <div className="relative w-full max-w-md bg-white rounded-2xl p-6 shadow-xl">
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">Settings</h4>
+            <label className="block text-sm text-gray-600 mb-1">Backend URL</label>
+            <input value={backendUrlDraft} onChange={(e)=>setBackendUrlDraft(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://your-backend" />
+            <p className="text-xs text-gray-500 mt-2">Current: <span className="font-mono">{BASE_URL}</span></p>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={()=>setShowSettings(false)} className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">Close</button>
+              <button onClick={saveBackendUrl} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white">Save</button>
             </div>
           </div>
         </div>
