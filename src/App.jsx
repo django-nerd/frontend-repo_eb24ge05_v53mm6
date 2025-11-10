@@ -32,6 +32,7 @@ function App() {
   const ENV_URL = import.meta.env.VITE_BACKEND_URL
   const DEFAULT_URL = 'https://ta-01k9qmnkhg6nmxz9yh6b76hrje-8000.wo-vegsibht7ip3wtc6l08w8melx.w.modal.host'
   const BASE_URL = (STORED_URL || ENV_URL || DEFAULT_URL)
+  const isInsecure = BASE_URL?.startsWith('http://')
 
   const [mode, setMode] = useState('login')
   const [name, setName] = useState('')
@@ -46,8 +47,28 @@ function App() {
   const [detailMeal, setDetailMeal] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
   const [backendUrlDraft, setBackendUrlDraft] = useState(BASE_URL)
+  const [apiStatus, setApiStatus] = useState(null) // null | 'ok' | 'fail'
+  const [apiStatusText, setApiStatusText] = useState('')
 
   const fileInputRef = useRef(null)
+
+  useEffect(() => {
+    // Quick ping to /test to surface connectivity/CORS issues early
+    const ping = async () => {
+      try {
+        const res = await fetch(`${BASE_URL}/test`, { method: 'GET' })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        await res.json()
+        setApiStatus('ok')
+        setApiStatusText('Connected')
+      } catch (e) {
+        setApiStatus('fail')
+        setApiStatusText((e?.message || 'Failed to reach backend'))
+      }
+    }
+    ping()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     const saved = localStorage.getItem('cv_user')
@@ -80,8 +101,9 @@ function App() {
           body: JSON.stringify({ name, email, password }),
         })
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          throw new Error(err.detail || 'Failed to sign up')
+          let errText = ''
+          try { errText = await res.text() } catch {}
+          throw new Error(errText || 'Signup failed')
         }
       }
 
@@ -91,8 +113,9 @@ function App() {
         body: JSON.stringify({ email, password }),
       })
       if (!res2.ok) {
-        const err = await res2.json().catch(() => ({}))
-        throw new Error(err.detail || 'Login failed')
+        let errText = ''
+        try { errText = await res2.text() } catch {}
+        throw new Error(errText || 'Login failed')
       }
       const data = await res2.json()
       setUser(data)
@@ -105,7 +128,8 @@ function App() {
       }
       fetchMeals(data.user_id)
     } catch (err) {
-      setMessage(err.message || 'Network error')
+      const hint = isInsecure ? ' (Your backend URL starts with http:// which most browsers block from an https page.)' : ''
+      setMessage((err?.message || 'Network error') + hint)
     }
   }
 
@@ -161,7 +185,8 @@ function App() {
       setShowDetail(true)
       setMessage('')
     } catch (err) {
-      setMessage(err.message || 'Network error')
+      const hint = isInsecure ? ' (Your backend URL starts with http:// which most browsers block from an https page.)' : ''
+      setMessage((err?.message || 'Network error') + hint)
     } finally {
       setUploading(false)
     }
@@ -198,6 +223,21 @@ function App() {
     } catch {}
   }
 
+  const testApiNow = async () => {
+    setApiStatus(null)
+    setApiStatusText('')
+    try {
+      const res = await fetch(`${BASE_URL}/test`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await res.json()
+      setApiStatus('ok')
+      setApiStatusText('Connected')
+    } catch (e) {
+      setApiStatus('fail')
+      setApiStatusText(e?.message || 'Failed to reach backend')
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center">
       <div className="w-full max-w-md p-6">
@@ -217,6 +257,12 @@ function App() {
             )}
           </div>
         </div>
+
+        {apiStatus === 'fail' && (
+          <div className="mb-3 text-xs rounded-lg p-3 border border-amber-300 bg-amber-50 text-amber-800">
+            Can't reach the API at <span className="font-mono">{BASE_URL}</span> — {apiStatusText}. {isInsecure ? 'Tip: Use https:// not http:// for the backend URL.' : ''}
+          </div>
+        )}
 
         {/* Auth */}
         {mode !== 'app' && (
@@ -240,7 +286,7 @@ function App() {
                 <label className="block text-sm text-gray-600 mb-1">Password</label>
                 <input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="••••••••" required />
               </div>
-              {message && <p className="text-sm text-red-600">{message}</p>}
+              {message && <p className="text-sm text-red-600 break-words">{message}</p>}
               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg transition">{mode==='login'?'Login':'Create account'}</button>
             </form>
           </div>
@@ -258,7 +304,7 @@ function App() {
                 <button onClick={onUploadClick} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm disabled:opacity-60" disabled={uploading}>{uploading? 'Analyzing...' : 'Take photo'}</button>
               </div>
               <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFileChange} />
-              {message && <p className="mt-3 text-sm text-gray-600">{message}</p>}
+              {message && <p className="mt-3 text-sm text-gray-600 break-words">{message}</p>}
             </div>
 
             <div className="bg-white rounded-2xl shadow p-6">
@@ -329,6 +375,15 @@ function App() {
             <label className="block text-sm text-gray-600 mb-1">Backend URL</label>
             <input value={backendUrlDraft} onChange={(e)=>setBackendUrlDraft(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://your-backend" />
             <p className="text-xs text-gray-500 mt-2">Current: <span className="font-mono">{BASE_URL}</span></p>
+            {isInsecure && (
+              <p className="text-xs text-red-600 mt-1">This URL uses http:// which is blocked by browsers on a secure page. Change to https://</p>
+            )}
+            <div className="flex items-center justify-between mt-3">
+              <button onClick={testApiNow} className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">Test API</button>
+              {apiStatus && (
+                <span className={`text-xs ${apiStatus==='ok'?'text-green-600':'text-amber-700'}`}>{apiStatus==='ok'?'API reachable':'API unreachable'}{apiStatusText?`: ${apiStatusText}`:''}</span>
+              )}
+            </div>
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={()=>setShowSettings(false)} className="px-3 py-1.5 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">Close</button>
               <button onClick={saveBackendUrl} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white">Save</button>
